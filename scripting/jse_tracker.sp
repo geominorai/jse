@@ -4,7 +4,7 @@
 #define DEBUG
 
 #define PLUGIN_AUTHOR "AI"
-#define PLUGIN_VERSION "0.5.1"
+#define PLUGIN_VERSION "0.6.0"
 
 #define API_URL "https://api.jumpacademy.tf/mapinfo_json"
 
@@ -46,6 +46,7 @@ GlobalForward g_hProgressLoadedForward;
 GlobalForward g_hCheckpointApproachedForward;
 GlobalForward g_hCheckpointReachedForward;
 GlobalForward g_hNewCheckpointReachedForward;
+GlobalForward g_hTrackerStateChangedForward;
 
 int g_iMapID = -1;
 bool g_bLoaded = false;
@@ -60,6 +61,8 @@ int g_iBonusCourses;
 
 ArrayList g_hProgress[MAXPLAYERS+1];
 int g_iLastBackupTime[MAXPLAYERS+1];
+
+TrackerState g_iTrackerState[MAXPLAYERS+1];
 
 ConVar g_hCVProximity;
 ConVar g_hCVTeleSettleTime;
@@ -118,6 +121,7 @@ public void OnPluginStart() {
 	g_hCourses = new ArrayList();
 
 	HookEvent("teamplay_round_start", Event_RoundStart);
+	HookEvent("player_spawn", Event_PlayerSpawn);
 
 	LoadTranslations("common.phrases");
 
@@ -135,6 +139,7 @@ public void OnPluginStart() {
 	g_hCheckpointApproachedForward = new GlobalForward("OnCheckpointApproached", ET_Ignore, Param_Cell, Param_Cell, Param_Cell, Param_Cell);
 	g_hCheckpointReachedForward = new GlobalForward("OnCheckpointReached", ET_Ignore, Param_Cell, Param_Cell, Param_Cell, Param_Cell);
 	g_hNewCheckpointReachedForward = new GlobalForward("OnNewCheckpointReached", ET_Ignore, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell);
+	g_hTrackerStateChangedForward = new GlobalForward("OnTrackerStateChanged", ET_Ignore, Param_Cell, Param_Cell, Param_Cell);
 
 	AutoExecConfig(true, "jse_tracker");
 }
@@ -184,6 +189,8 @@ public APLRes AskPluginLoad2(Handle hMyself, bool bLate, char[] sError, int sErr
 	CreateNative("GetCourseDisplayName", Native_GetCourseDisplayName);
 	CreateNative("GetCheckpointDisplayName", Native_GetCheckpointDisplayName);
 	CreateNative("GetCourseCheckpointDisplayName", Native_GetCourseCheckpointDisplayName);
+	CreateNative("GetTrackerState", Native_GetTrackerState);
+	CreateNative("SetTrackerState", Native_SetTrackerState);
 
 	return APLRes_Success;
 }
@@ -231,6 +238,8 @@ public void OnClientConnected(int iClient) {
 	} else {
 		g_hProgress[iClient] = new ArrayList(sizeof(Checkpoint));
 	}
+
+	g_iTrackerState[iClient] = TrackerState_Normal;
 }
 
 public void OnClientPostAdminCheck(int iClient) {
@@ -263,6 +272,16 @@ public void OnConfigsExecuted() {
 
 public Action Event_RoundStart(Event hEvent, const char[] sName, bool bDontBroadcast) {
 	SetupTeleportHook();
+
+	return Plugin_Continue;
+}
+
+public Action Event_PlayerSpawn(Event hEvent, const char[] sName, bool bDontBroadcast) {
+	int iClient = GetClientOfUserId(hEvent.GetInt("userid"));
+
+	if (g_iTrackerState[iClient] == TrackerState_Pause) {
+		SetTrackerState(TrackerState_Normal);
+	}
 
 	return Plugin_Continue;
 }
@@ -786,6 +805,41 @@ public int Native_GetCourseCheckpointDisplayName(Handle hPlugin, int iArgC) {
 	return 0;
 }
 
+public any Native_GetTrackerState(Handle hPlugin, int iArgC) {
+	int iClient = GetNativeCell(1);
+	return g_iTrackerState[iClient];
+}
+
+public any Native_SetTrackerState(Handle hPlugin, int iArgC) {
+	int iClient = GetNativeCell(1);
+	TrackerState iNewTrackerState = GetNativeCell(2);
+
+	TrackerState iPreviousTrackerState = g_iTrackerState[iClient];
+	g_iTrackerState[iClient] = iNewTrackerState;
+
+	if (iPreviousTrackerState != iNewTrackerState) {
+		switch (iNewTrackerState) {
+			case TrackerState_Disable: {
+				CReplyToCommand(iClient, "{dodgerblue}[jse] {white}Progress tracker is disabled.");
+			}
+			case TrackerState_Normal: {
+				CReplyToCommand(iClient, "{dodgerblue}[jse] {white}Progress tracker is enabled.");
+			}
+			case TrackerState_Pause: {
+				CReplyToCommand(iClient, "{dodgerblue}[jse] {white}Progress tracker is paused.  Reset to resume tracking.");
+			}
+		}
+
+		Call_StartForward(g_hTrackerStateChangedForward);
+		Call_PushCell(iClient);
+		Call_PushCell(iPreviousTrackerState);
+		Call_PushCell(iNewTrackerState);
+		Call_Finish();
+	}
+
+	return iPreviousTrackerState;
+}
+
 // Timers
 
 public Action Timer_Refetch(Handle hTimer) {
@@ -917,6 +971,10 @@ public Action Timer_TrackPlayers(Handle hTimer, any aData) {
 
 	for (int i=0; i<iActiveClientCount; i++) {
 		int iClient = iActiveClients[i];
+
+		if (g_iTrackerState[iClient] != TrackerState_Normal) {
+			continue;
+		}
 
 		if (g_eNearestCheckpoint[iClient].iHash == g_eNearestCheckpointLanded[iClient].iHash) {
 			g_eNearestCheckpointLanded[iClient].iLastUpdateTime = iTime;
