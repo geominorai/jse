@@ -311,5 +311,5 @@ native bool GetCourseDisplayName(Course mCourse, char[] sBuffer, int iMaxLen);
 native bool GetCheckpointDisplayName(Course mCourse, int iJumpNumber, bool bControlPoint, char[] sBuffer, int iMaxLen);
 native void GetCourseCheckpointDisplayName(Course mCourse, int iJumpNumber, bool bControlPoint, char[] sBuffer, int iMaxLen);
 
-native TrackerState GetTrackerState();
-native TrackerState SetTrackerState(TrackerState iTrackerState);
+native TrackerState GetTrackerState(int iClient);
+native TrackerState SetTrackerState(int iClient, TrackerState iTrackerState);

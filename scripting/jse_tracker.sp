@@ -280,7 +280,7 @@ public Action Event_PlayerSpawn(Event hEvent, const char[] sName, bool bDontBroa
 	int iClient = GetClientOfUserId(hEvent.GetInt("userid"));
 
 	if (g_iTrackerState[iClient] == TrackerState_Pause) {
-		SetTrackerState(TrackerState_Normal);
+		SetTrackerState(iClient, TrackerState_Normal);
 	}
 
 	return Plugin_Continue;
