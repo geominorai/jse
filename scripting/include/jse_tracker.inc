@@ -271,9 +271,9 @@ enum struct Checkpoint {
 }
 
 enum TrackerState {
-	TrackerState_Disable,
-	TrackerState_Normal,
-	TrackerState_Pause
+	TrackerState_Disabled,
+	TrackerState_Enabled,
+	TrackerState_Paused
 }
 
 const Course NULL_COURSE = view_as<Course>(0);
@@ -288,6 +288,8 @@ forward void OnProgressLoaded(int iClient);
 forward void OnCheckpointApproached(int iClient, int iCourseNumber, int iJumpNumber, bool bControlPoint);
 forward void OnCheckpointReached(int iClient, int iCourseNumber, int iJumpNumber, bool bControlPoint);
 forward void OnNewCheckpointReached(int iClient, int iCourseNumber, int iJumpNumber, bool bControlPoint, bool bUnlock);
+
+forward Action OnTrackerResume(int iClient);
 forward void OnTrackerStateChanged(int iClient, TrackerState iPreviousTrackerState, TrackerState iNewTrackerState);
 
 native bool IsTrackerLoaded();
@@ -311,5 +313,5 @@ native bool GetCourseDisplayName(Course mCourse, char[] sBuffer, int iMaxLen);
 native bool GetCheckpointDisplayName(Course mCourse, int iJumpNumber, bool bControlPoint, char[] sBuffer, int iMaxLen);
 native void GetCourseCheckpointDisplayName(Course mCourse, int iJumpNumber, bool bControlPoint, char[] sBuffer, int iMaxLen);
 
-native TrackerState GetTrackerState(int iClient);
-native TrackerState SetTrackerState(int iClient, TrackerState iTrackerState);
+native void GetTrackerState(int iClient);
+native void PauseTracker(int iClient);

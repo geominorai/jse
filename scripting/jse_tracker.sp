@@ -46,6 +46,7 @@ GlobalForward g_hProgressLoadedForward;
 GlobalForward g_hCheckpointApproachedForward;
 GlobalForward g_hCheckpointReachedForward;
 GlobalForward g_hNewCheckpointReachedForward;
+GlobalForward g_hTrackerResumeForward;
 GlobalForward g_hTrackerStateChangedForward;
 
 int g_iMapID = -1;
@@ -139,6 +140,7 @@ public void OnPluginStart() {
 	g_hCheckpointApproachedForward = new GlobalForward("OnCheckpointApproached", ET_Ignore, Param_Cell, Param_Cell, Param_Cell, Param_Cell);
 	g_hCheckpointReachedForward = new GlobalForward("OnCheckpointReached", ET_Ignore, Param_Cell, Param_Cell, Param_Cell, Param_Cell);
 	g_hNewCheckpointReachedForward = new GlobalForward("OnNewCheckpointReached", ET_Ignore, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell);
+	g_hTrackerResumeForward = new GlobalForward("OnTrackerResume", ET_Hook, Param_Cell);
 	g_hTrackerStateChangedForward = new GlobalForward("OnTrackerStateChanged", ET_Ignore, Param_Cell, Param_Cell, Param_Cell);
 
 	AutoExecConfig(true, "jse_tracker");
@@ -190,7 +192,7 @@ public APLRes AskPluginLoad2(Handle hMyself, bool bLate, char[] sError, int sErr
 	CreateNative("GetCheckpointDisplayName", Native_GetCheckpointDisplayName);
 	CreateNative("GetCourseCheckpointDisplayName", Native_GetCourseCheckpointDisplayName);
 	CreateNative("GetTrackerState", Native_GetTrackerState);
-	CreateNative("SetTrackerState", Native_SetTrackerState);
+	CreateNative("PauseTracker", Native_PauseTracker);
 
 	return APLRes_Success;
 }
@@ -239,7 +241,7 @@ public void OnClientConnected(int iClient) {
 		g_hProgress[iClient] = new ArrayList(sizeof(Checkpoint));
 	}
 
-	g_iTrackerState[iClient] = TrackerState_Normal;
+	g_iTrackerState[iClient] = TrackerState_Enabled;
 }
 
 public void OnClientPostAdminCheck(int iClient) {
@@ -279,8 +281,16 @@ public Action Event_RoundStart(Event hEvent, const char[] sName, bool bDontBroad
 public Action Event_PlayerSpawn(Event hEvent, const char[] sName, bool bDontBroadcast) {
 	int iClient = GetClientOfUserId(hEvent.GetInt("userid"));
 
-	if (g_iTrackerState[iClient] == TrackerState_Pause) {
-		SetTrackerState(iClient, TrackerState_Normal);
+	if (g_iTrackerState[iClient] == TrackerState_Paused) {
+		Call_StartForward(g_hTrackerResumeForward);
+		Call_PushCell(iClient);
+
+		Action iReturn;
+		if (Call_Finish(iReturn) == SP_ERROR_NONE && iReturn == Plugin_Continue) {
+			SetTrackerState(iClient, TrackerState_Enabled);
+		} else {
+			CReplyToCommand(iClient, "{dodgerblue}[jse] {white}Progress tracker was blocked from resuming.");
+		}
 	}
 
 	return Plugin_Continue;
@@ -810,34 +820,14 @@ public any Native_GetTrackerState(Handle hPlugin, int iArgC) {
 	return g_iTrackerState[iClient];
 }
 
-public any Native_SetTrackerState(Handle hPlugin, int iArgC) {
+public int Native_PauseTracker(Handle hPlugin, int iArgC) {
 	int iClient = GetNativeCell(1);
-	TrackerState iNewTrackerState = GetNativeCell(2);
 
-	TrackerState iPreviousTrackerState = g_iTrackerState[iClient];
-	g_iTrackerState[iClient] = iNewTrackerState;
-
-	if (iPreviousTrackerState != iNewTrackerState) {
-		switch (iNewTrackerState) {
-			case TrackerState_Disable: {
-				CReplyToCommand(iClient, "{dodgerblue}[jse] {white}Progress tracker is disabled.");
-			}
-			case TrackerState_Normal: {
-				CReplyToCommand(iClient, "{dodgerblue}[jse] {white}Progress tracker is enabled.");
-			}
-			case TrackerState_Pause: {
-				CReplyToCommand(iClient, "{dodgerblue}[jse] {white}Progress tracker is paused.  Reset to resume tracking.");
-			}
-		}
-
-		Call_StartForward(g_hTrackerStateChangedForward);
-		Call_PushCell(iClient);
-		Call_PushCell(iPreviousTrackerState);
-		Call_PushCell(iNewTrackerState);
-		Call_Finish();
+	if (g_iTrackerState[iClient] == TrackerState_Enabled) {
+		SetTrackerState(iClient, TrackerState_Paused);
 	}
 
-	return iPreviousTrackerState;
+	return 0;
 }
 
 // Timers
@@ -972,7 +962,7 @@ public Action Timer_TrackPlayers(Handle hTimer, any aData) {
 	for (int i=0; i<iActiveClientCount; i++) {
 		int iClient = iActiveClients[i];
 
-		if (g_iTrackerState[iClient] != TrackerState_Normal) {
+		if (g_iTrackerState[iClient] != TrackerState_Enabled) {
 			continue;
 		}
 
@@ -1389,6 +1379,31 @@ void SetupTeleportHook() {
 void SetupTimer() {
 	if (g_hTimer == null) {
 		g_hTimer = CreateTimer(g_hCVInterval.FloatValue, Timer_TrackPlayers, INVALID_HANDLE, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
+	}
+}
+
+void SetTrackerState(int iClient, TrackerState iNewTrackerState) {
+	TrackerState iPreviousTrackerState = g_iTrackerState[iClient];
+	g_iTrackerState[iClient] = iNewTrackerState;
+
+	if (iPreviousTrackerState != iNewTrackerState) {
+		switch (iNewTrackerState) {
+			case TrackerState_Disabled: {
+				CReplyToCommand(iClient, "{dodgerblue}[jse] {white}Progress tracker is disabled.");
+			}
+			case TrackerState_Enabled: {
+				CReplyToCommand(iClient, "{dodgerblue}[jse] {white}Progress tracker is enabled.");
+			}
+			case TrackerState_Paused: {
+				CReplyToCommand(iClient, "{dodgerblue}[jse] {white}Progress tracker is paused.  Respawn to resume tracking.");
+			}
+		}
+
+		Call_StartForward(g_hTrackerStateChangedForward);
+		Call_PushCell(iClient);
+		Call_PushCell(iPreviousTrackerState);
+		Call_PushCell(iNewTrackerState);
+		Call_Finish();
 	}
 }
 
