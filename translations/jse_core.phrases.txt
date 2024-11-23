@@ -1,13 +1,24 @@
 "Phrases"
 {
+	"Bazooka Projectile Spread"
+	{
+		"en"			"Bazooka Projectile Spread"
+	}
+
 	"Regen Toggle"
 	{
 		"#format"		"{1:t}"
 		"en"			"Ammo and clip regeneration {1}."
 	}
 
-	"Bazooka Projectile Spread"
+	"Return Start"
 	{
-		"en"			"Bazooka Projectile Spread"
+		"en"			"Returned to start."
+	}
+
+	"Return Start Target"
+	{
+		"#format"		"{1:s}"
+		"en"			"Returned {1} to start."
 	}
 }

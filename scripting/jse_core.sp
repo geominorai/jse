@@ -4,7 +4,7 @@
 #define DEBUG
 
 #define PLUGIN_AUTHOR "AI"
-#define PLUGIN_VERSION "0.3.6"
+#define PLUGIN_VERSION "0.4.0"
 
 #define DATA_FOLDER "data/jse"
 
@@ -13,6 +13,8 @@
 #define BAZOOKA_ITEMDEF_INDEX	730
 #define BAZOOKA_SPREAD_ATTRIB	411
 #define BAZOOKA_DEFAULT_SPREAD	3.0
+
+#define RESET_TARGET_OVERRIDE		"jse_core_resettarget"
 
 #include <sourcemod>
 #include <clientprefs>
@@ -64,7 +66,9 @@ Handle g_hSDKGetMaxClip1;
 Handle g_hSDKFinishUpgrading;
 Handle g_hSDKFinishBuilding;
 
-Handle g_hCaptureForward;
+GlobalForward g_hCaptureForward;
+GlobalForward g_hClearSessionForward;
+GlobalForward g_hResetForward;
 
 ArrayList g_hBlockSounds;
 
@@ -130,6 +134,10 @@ public void OnPluginStart() {
 
 	RegConsoleCmd("sm_ammo", cmdAmmo, "Toggles ammo and weapon clip regeneration");
 	RegConsoleCmd("sm_regen", cmdAmmo, "Toggles ammo and weapon clip regeneration");
+
+	RegConsoleCmd("sm_r", cmdReset, "Return to start");
+	RegConsoleCmd("sm_reset", cmdReset, "Return to start");
+	RegConsoleCmd("sm_restart", cmdRestart, "Clear session and return to start");
 
 	g_hBlockSounds = new ArrayList(128);
 
@@ -226,6 +234,8 @@ public void OnPluginStart() {
 	}
 
 	g_hCaptureForward = CreateGlobalForward("OnCapPointCapture", ET_Single, Param_Cell, Param_Cell, Param_Cell, Param_String, Param_String);
+	g_hClearSessionForward = CreateGlobalForward("OnPlayerClearSession", ET_Ignore, Param_Cell);
+	g_hResetForward = CreateGlobalForward("OnPlayerReset", ET_Event, Param_Cell);
 
 	g_hBazookaSpreadCookie = new Cookie("jse_core_bazookaspread", "Preference for bazooka projectile spread if allowed by server", CookieAccess_Private);
 	SetCookieMenuItem(CookieMenuHandler_BazookaSpread, 0, "Bazooka Projectile Spread");
@@ -826,6 +836,11 @@ public int Native_ClearScore(Handle hPlugin, int iArgC) {
 // Commands
 
 public Action cmdAmmo(int iClient, int iArgC) {
+	if (!iClient) {
+		ReplyToCommand(iClient, "[jse] %t", "Command is in-game only");
+		return Plugin_Handled;
+	}
+
 	if (g_bBlockEquip[iClient] || g_bBlockRegen[iClient]) {
 		CReplyToCommand(iClient, "{dodgerblue}[jse] {white}%t", "No Access");
 		return Plugin_Handled;
@@ -838,20 +853,183 @@ public Action cmdAmmo(int iClient, int iArgC) {
 	return Plugin_Handled;
 }
 
-// Helpers
-/*
-bool checkSpawned(int iClient) {
-	TFClassType iClass = TF2_GetPlayerClass(iClient);
-	TFTeam iTFTeam = TF2_GetClientTeam(iClient);
+public Action cmdReset(int iClient, int iArgC) {
+	if (!iArgC) {
+		if (!iClient) {
+			ReplyToCommand(iClient, "[jse] %t", "Command is in-game only");
+			return Plugin_Handled;
+		}
 
-	if (iTFTeam <= TFTeam_Spectator || iClass == TFClass_Unknown) {
-		CReplyToCommand(iClient, "{dodgerblue}[jse] {white}You must be spawned to use this command.");
-		return false;
+		TFClassType iClass = TF2_GetPlayerClass(iClient);
+		TFTeam iTFTeam = TF2_GetClientTeam(iClient);
+
+		if (iTFTeam <= TFTeam_Spectator || iClass == TFClass_Unknown) {
+			CReplyToCommand(iClient, "{dodgerblue}[jse] {white}%t", "Target must be alive");
+			return Plugin_Handled;
+		}
+
+		Action iReturn;
+		Call_StartForward(g_hResetForward);
+		Call_PushCell(iClient);
+		if (Call_Finish(iReturn) == SP_ERROR_NONE) {
+			switch (iReturn) {
+				case Plugin_Handled, Plugin_Stop: {
+					return Plugin_Handled;
+				}
+			}
+		}
+
+		ClearControlPointCapture(iClient);
+
+		TF2_RespawnPlayer(iClient);
+
+		CReplyToCommand(iClient, "{dodgerblue}[jse] {white}%t", "Return Start");
+
+		return Plugin_Handled;
 	}
 
-	return true;
+	if (!CheckCommandAccess(iClient, RESET_TARGET_OVERRIDE, ADMFLAG_GENERIC)) {
+		return Plugin_Handled;
+	}
+
+	char sArg1[MAX_NAME_LENGTH];
+	GetCmdArg(1, sArg1, sizeof(sArg1));
+
+	char sTargetName[MAX_TARGET_LENGTH];
+	int iTargetList[MAXPLAYERS], iTargetCount;
+	bool bTnIsML;
+
+	if ((iTargetCount = ProcessTargetString(
+			sArg1,
+			iClient,
+			iTargetList,
+			MAXPLAYERS,
+			COMMAND_FILTER_ALIVE,
+			sTargetName,
+			sizeof(sTargetName),
+			bTnIsML)) <= 0) {
+		ReplyToTargetError(iClient, iTargetCount);
+		return Plugin_Handled;
+	}
+
+	for (int i=0; i<iTargetCount; i++) {
+		Action iReturn;
+		Call_StartForward(g_hResetForward);
+		Call_PushCell(iTargetList[i]);
+		if (Call_Finish(iReturn) == SP_ERROR_NONE) {
+			switch (iReturn) {
+				case Plugin_Handled, Plugin_Stop: {
+					continue;
+				}
+			}
+		}
+
+		ClearControlPointCapture(iTargetList[i]);
+
+		TF2_RespawnPlayer(iTargetList[i]);
+
+		CReplyToCommand(iTargetList[i], "{dodgerblue}[jse] {white}%t", "Return Start");
+	}
+
+	CReplyToCommand(iClient, "{dodgerblue}[jse] {white}%t", "Return Start Target", sTargetName);
+
+	return Plugin_Handled;
 }
-*/
+
+public Action cmdRestart(int iClient, int iArgC) {
+	if (!iArgC) {
+		if (!iClient) {
+			ReplyToCommand(iClient, "[jse] %t", "Command is in-game only");
+			return Plugin_Handled;
+		}
+
+		TFClassType iClass = TF2_GetPlayerClass(iClient);
+		TFTeam iTFTeam = TF2_GetClientTeam(iClient);
+
+		if (iTFTeam <= TFTeam_Spectator || iClass == TFClass_Unknown) {
+			CReplyToCommand(iClient, "{dodgerblue}[jse] {white}%t", "Target must be alive");
+			return Plugin_Handled;
+		}
+
+		ClearControlPointCapture(iClient);
+		ClearScore(iClient);
+
+		Call_StartForward(g_hClearSessionForward);
+		Call_PushCell(iClient);
+		Call_Finish();
+
+		Action iReturn;
+		Call_StartForward(g_hResetForward);
+		Call_PushCell(iClient);
+		if (Call_Finish(iReturn) == SP_ERROR_NONE) {
+			switch (iReturn) {
+				case Plugin_Handled, Plugin_Stop: {
+					return Plugin_Handled;
+				}
+			}
+		}
+
+		TF2_RespawnPlayer(iClient);
+
+		CReplyToCommand(iClient, "{dodgerblue}[jse] {white}%t", "Return Start");
+
+		return Plugin_Handled;
+	}
+
+	if (!CheckCommandAccess(iClient, RESET_TARGET_OVERRIDE, ADMFLAG_GENERIC)) {
+		return Plugin_Handled;
+	}
+
+	char sArg1[MAX_NAME_LENGTH];
+	GetCmdArg(1, sArg1, sizeof(sArg1));
+
+	char sTargetName[MAX_TARGET_LENGTH];
+	int iTargetList[MAXPLAYERS], iTargetCount;
+	bool bTnIsML;
+
+	if ((iTargetCount = ProcessTargetString(
+			sArg1,
+			iClient,
+			iTargetList,
+			MAXPLAYERS,
+			COMMAND_FILTER_ALIVE,
+			sTargetName,
+			sizeof(sTargetName),
+			bTnIsML)) <= 0) {
+		ReplyToTargetError(iClient, iTargetCount);
+		return Plugin_Handled;
+	}
+
+	for (int i=0; i<iTargetCount; i++) {
+		ClearControlPointCapture(iTargetList[i]);
+		ClearScore(iTargetList[i]);
+
+		Call_StartForward(g_hClearSessionForward);
+		Call_PushCell(iTargetList[i]);
+		Call_Finish();
+
+		Action iReturn;
+		Call_StartForward(g_hResetForward);
+		Call_PushCell(iTargetList[i]);
+		if (Call_Finish(iReturn) == SP_ERROR_NONE) {
+			switch (iReturn) {
+				case Plugin_Handled, Plugin_Stop: {
+					continue;
+				}
+			}
+		}
+
+		TF2_RespawnPlayer(iTargetList[i]);
+
+		CReplyToCommand(iTargetList[i], "{dodgerblue}[jse] {white}%t", "Return Start");
+	}
+
+	CReplyToCommand(iClient, "{dodgerblue}[jse] {white}%t", "Return Start Target", sTargetName);
+
+	return Plugin_Handled;
+}
+
+// Helpers
 
 void PrecacheSounds() {
 	char sSound[PLATFORM_MAX_PATH];

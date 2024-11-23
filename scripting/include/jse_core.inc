@@ -40,6 +40,9 @@ native void ClearScore(int iClient);
 
 forward int OnCapPointCapture(int iClient, int iCapPointEntity, int iCapAreaEntity, const char[] sCapPointName, const char[] sCapPrintName);
 
+forward void OnPlayerClearSession(int iClient);
+forward Action OnPlayerReset(int iClient);
+
 // Capture options
 #define CAP_ABORT			(0)
 #define CAP_SND_BROADCAST	(1<<0)
